@@ -1,3 +1,4 @@
+import hmac
 import math
 from collections import defaultdict, deque
 import streamlit as st
@@ -14,6 +15,41 @@ st.set_page_config(
     layout="wide",
     initial_sidebar_state="collapsed",
 )
+
+# =========================================================
+# パスワード認証ゲート
+# =========================================================
+def check_password() -> bool:
+    """Streamlit Secrets に設定されたパスワードでアクセスを制限する"""
+    if st.session_state.get("authenticated", False):
+        return True
+
+    try:
+        correct_password = st.secrets["APP_PASSWORD"]
+    except Exception:
+        st.error("【設定未完了】Streamlit の Secrets に `APP_PASSWORD` を設定してください。")
+        st.stop()
+
+    st.markdown("### 🔒 基準点測量 選点計画システム ログイン")
+    st.caption("事務所内専用ツールです。パスワードを入力してください。")
+
+    with st.form("login_form"):
+        entered_pw = st.text_input("パスワード", type="password", placeholder="パスワードを入力")
+        submitted = st.form_submit_button("ログイン", type="primary", use_container_width=True)
+
+    if submitted:
+        if hmac.compare_digest(entered_pw, str(correct_password)):
+            st.session_state["authenticated"] = True
+            st.rerun()
+        else:
+            st.error("パスワードが正しくありません。")
+
+    return False
+
+
+if not check_password():
+    st.stop()
+# =========================================================
 
 # ---------------------------------------------------------
 # レスポンシブ＆ラベル重なり・クリック貫通対策 CSS
@@ -654,6 +690,11 @@ with st.sidebar:
     )
 
     show_buffers = st.checkbox("距離基準円を表示（100m恒久的地物・200m単位多角）", value=False)
+
+    st.divider()
+    if st.button("🔒 ログアウト", use_container_width=True):
+        st.session_state["authenticated"] = False
+        st.rerun()
 
 # ---------------------------------------------------------
 # ヘッダー＆コンパクト設定バー
