@@ -16,9 +16,10 @@ st.set_page_config(
     initial_sidebar_state="collapsed",
 )
 
-# =========================================================
-# パスワード認証ゲート
-# =========================================================
+
+# ---------------------------------------------------------
+# パスワード認証ゲート（Streamlit Secrets: APP_PASSWORD）
+# ---------------------------------------------------------
 def check_password() -> bool:
     """Streamlit Secrets に設定されたパスワードでアクセスを制限する"""
     if st.session_state.get("authenticated", False):
@@ -27,7 +28,7 @@ def check_password() -> bool:
     try:
         correct_password = st.secrets["APP_PASSWORD"]
     except Exception:
-        st.error("【設定未完了】Streamlit の Secrets に `APP_PASSWORD` を設定してください。")
+        st.error("【設定未完了】Streamlit Cloud の Settings > Secrets に `APP_PASSWORD` を設定してください。")
         st.stop()
 
     st.markdown("### 🔒 基準点測量 選点計画システム ログイン")
@@ -49,7 +50,6 @@ def check_password() -> bool:
 
 if not check_password():
     st.stop()
-# =========================================================
 
 # ---------------------------------------------------------
 # レスポンシブ＆ラベル重なり・クリック貫通対策 CSS
@@ -303,18 +303,14 @@ def compute_label_transforms(df: pd.DataFrame, threshold_m: float = 65.0) -> dic
 # 結合多角網（Y字型・H字型・多角網）トポロジー解析ユーティリティ
 # ---------------------------------------------------------
 def analyze_network_topology(routes_dict: dict, pts_lookup: dict, terrain_type: str):
-    """
-    複数路線から構成される多角網を解析する（マニュアル第4条・第16条・第18条、要領第28条準拠）
-    """
+    """複数路線から構成される多角網を解析する（マニュアル第4条・第16条・第18条、要領第28条準拠）"""
     valid_routes = {rname: pts for rname, pts in routes_dict.items() if len(pts) >= 2}
     if not valid_routes:
         return None
 
-    # 無向グラフと有向辺の構築
     adj = defaultdict(set)
-    unique_edges = {}  # (min_u, max_v) -> dist
-    node_route_endpoints = defaultdict(int)  # 各路線の端点として出現した回数
-    node_appearances = defaultdict(int)      # 全路線での出現回数
+    unique_edges = {}
+    node_route_endpoints = defaultdict(int)
     all_nodes = set()
 
     for rname, pts in valid_routes.items():
@@ -322,7 +318,6 @@ def analyze_network_topology(routes_dict: dict, pts_lookup: dict, terrain_type: 
         node_route_endpoints[pts[-1]] += 1
         for idx, p in enumerate(pts):
             all_nodes.add(p)
-            node_appearances[p] += 1
             if idx < len(pts) - 1:
                 u, v = pts[idx], pts[idx + 1]
                 if u != v:
@@ -334,7 +329,6 @@ def analyze_network_topology(routes_dict: dict, pts_lookup: dict, terrain_type: 
                         dist, _ = calc_distance_and_azimuth(p1["X"], p1["Y"], p2["X"], p2["Y"])
                         unique_edges[key] = dist
 
-    # 交点の抽出（マニュアル第4条解説2：異なる多角路線が3路線以上で交わる点、または次数3以上の新点）
     junction_nodes = set()
     for node in all_nodes:
         if pts_lookup[node]["区分"] == "新点":
@@ -344,7 +338,6 @@ def analyze_network_topology(routes_dict: dict, pts_lookup: dict, terrain_type: 
     known_nodes = [n for n in all_nodes if pts_lookup[n]["区分"] == "既知点"]
     new_nodes = [n for n in all_nodes if pts_lookup[n]["区分"] == "新点"]
 
-    # 連結成分数の確認（網が1つにつながっているか）
     visited = set()
     components = 0
     for start in all_nodes:
@@ -359,13 +352,9 @@ def analyze_network_topology(routes_dict: dict, pts_lookup: dict, terrain_type: 
                         visited.add(nxt)
                         q.append(nxt)
 
-    # 開放端（次数1の新点＝行き止まり点）の検出
     dangling_new_nodes = [n for n in new_nodes if len(adj[n]) <= 1]
-
-    # 独立閉合環（単位多角形）の概算個数（オイラーの公式: E - V + C）
     num_cycles = len(unique_edges) - len(all_nodes) + components
 
-    # 網形パターン分類（マニュアル第4条・第18条解説2）
     if components > 1:
         net_shape = "未連結網（路線が分断されています）"
     elif len(dangling_new_nodes) > 0:
@@ -381,7 +370,6 @@ def analyze_network_topology(routes_dict: dict, pts_lookup: dict, terrain_type: 
     else:
         net_shape = f"結合多角網（既知点{len(known_nodes)}点・交点{len(junction_nodes)}点）"
 
-    # 交点における分岐路線間の夾角計算（マニュアル第4条解説3）
     junction_angles = []
     for jnode in sorted(junction_nodes):
         pj = pts_lookup[jnode]
@@ -391,7 +379,7 @@ def analyze_network_topology(routes_dict: dict, pts_lookup: dict, terrain_type: 
             pnb = pts_lookup[nb]
             _, az = calc_distance_and_azimuth(pj["X"], pj["Y"], pnb["X"], pnb["Y"])
             dirs.append((az, nb))
-        dirs.sort(key=lambda x: x[0])  # 北基準時計回りにソート
+        dirs.sort(key=lambda x: x[0])
 
         for idx in range(len(dirs)):
             az1, nb1 = dirs[idx]
@@ -407,14 +395,12 @@ def analyze_network_topology(routes_dict: dict, pts_lookup: dict, terrain_type: 
                 }
             )
 
-    # 点検路線の自動探索（マニュアル第16条第2項：既知点と既知点を結ぶ最短路線）
     check_routes = []
     connected_known_set = set()
     sorted_known = sorted(known_nodes)
     for i in range(len(sorted_known)):
         for j in range(i + 1, len(sorted_known)):
             k_start, k_end = sorted_known[i], sorted_known[j]
-            # BFSで最小辺数の経路を探索
             queue = deque([[k_start]])
             seen = {k_start}
             found_path = None
@@ -425,7 +411,6 @@ def analyze_network_topology(routes_dict: dict, pts_lookup: dict, terrain_type: 
                     found_path = path
                     break
                 for nxt in sorted(adj[curr]):
-                    # 途中で別の既知点を通過しない最短結合経路を優先
                     if nxt != k_end and pts_lookup[nxt]["区分"] == "既知点":
                         continue
                     if nxt not in seen:
@@ -441,7 +426,6 @@ def analyze_network_topology(routes_dict: dict, pts_lookup: dict, terrain_type: 
                     total_d += unique_edges[ekey]
                 n_sides = len(found_path) - 1
                 s_km = total_d / 1000.0
-                # 要領第28条解説5の結合路線閉合差許容限度
                 allow_pos_cm = 20.0 + 10.0 * math.sqrt(s_km)
                 allow_h_cm = 20.0 + 30.0 * math.sqrt(s_km / max(n_sides, 1))
                 check_routes.append(
@@ -551,7 +535,6 @@ def export_sima(df: pd.DataFrame) -> bytes:
 
 
 def create_sample_data(zone: int) -> pd.DataFrame:
-    """Y字型・H字型結合トラバースもすぐ検証できる6点の既知点サンプル（第6系・奈良市想定）"""
     to_latlon, _ = get_transformers(zone)
     sample_pts = [
         ("街区三角点101", "街区三角点 (2級相当)", "既知点", -145180.000, -18560.000, 65.500),
@@ -598,6 +581,8 @@ def clear_all_new_points():
 # ---------------------------------------------------------
 # セッション状態の初期化
 # ---------------------------------------------------------
+if "current_zone" not in st.session_state:
+    st.session_state["current_zone"] = 6
 if "points_df" not in st.session_state:
     st.session_state["points_df"] = create_sample_data(6)
 if "new_point_counter" not in st.session_state:
@@ -612,6 +597,8 @@ if "active_route_name" not in st.session_state:
     st.session_state["active_route_name"] = "路線1"
 if "editor_version" not in st.session_state:
     st.session_state["editor_version"] = 0
+if "uploader_version" not in st.session_state:
+    st.session_state["uploader_version"] = 0
 
 # ---------------------------------------------------------
 # サイドバー：座標系・SIMA読込・作業規程パラメータ設定
@@ -625,12 +612,30 @@ with st.sidebar:
         format_func=lambda z: ZONE_NAMES[z],
     )
 
-    uploaded_file = st.file_uploader("SIMAファイル (.sim / .txt)", type=["sim", "txt"])
-    col_u1, col_u2 = st.columns(2)
-    with col_u1:
-        if uploaded_file is not None and st.button("SIMA読込", use_container_width=True):
+    # 座標系が変更された場合、既存座標の緯度経度を再計算
+    if zone != st.session_state["current_zone"]:
+        st.session_state["current_zone"] = zone
+        to_latlon_new, _ = get_transformers(zone)
+        df_tmp = st.session_state["points_df"].copy()
+        for idx, row in df_tmp.iterrows():
+            if pd.notna(row["X"]) and pd.notna(row["Y"]):
+                lat, lon = to_latlon_new.transform(float(row["X"]), float(row["Y"]))
+                df_tmp.at[idx, "lat"] = lat
+                df_tmp.at[idx, "lon"] = lon
+        st.session_state["points_df"] = df_tmp
+        st.session_state["editor_version"] += 1
+
+    # スマホ対応：type=None で全ファイル選択許可＆選択と同時に自動読込
+    uploaded_file = st.file_uploader(
+        "SIMAファイル (.sim / .txt)",
+        type=None,
+        key=f"sima_uploader_{st.session_state['uploader_version']}",
+    )
+    if uploaded_file is not None:
+        file_sig = (uploaded_file.name, uploaded_file.size, zone)
+        if st.session_state.get("last_uploaded_sig") != file_sig:
             try:
-                df_loaded = parse_sima(uploaded_file.read(), zone)
+                df_loaded = parse_sima(uploaded_file.getvalue(), zone)
                 if df_loaded.empty:
                     st.error("A01座標レコードが見つかりませんでした。")
                 else:
@@ -639,18 +644,21 @@ with st.sidebar:
                     st.session_state["routes_dict"] = {"路線1": []}
                     st.session_state["active_route_name"] = "路線1"
                     st.session_state["editor_version"] += 1
+                    st.session_state["last_uploaded_sig"] = file_sig
                     st.success(f"{len(df_loaded)}点読み込みました")
                     st.rerun()
             except Exception as e:
                 st.error(f"読込エラー: {e}")
-    with col_u2:
-        if st.button("サンプル読込", use_container_width=True):
-            st.session_state["points_df"] = create_sample_data(zone)
-            st.session_state["new_point_counter"] = 1
-            st.session_state["routes_dict"] = {"路線1": []}
-            st.session_state["active_route_name"] = "路線1"
-            st.session_state["editor_version"] += 1
-            st.rerun()
+
+    if st.button("サンプル読込", use_container_width=True):
+        st.session_state["points_df"] = create_sample_data(zone)
+        st.session_state["new_point_counter"] = 1
+        st.session_state["routes_dict"] = {"路線1": []}
+        st.session_state["active_route_name"] = "路線1"
+        st.session_state["editor_version"] += 1
+        st.session_state["uploader_version"] += 1
+        st.session_state["last_uploaded_sig"] = None
+        st.rerun()
 
     st.divider()
     st.header("2. 地域区分・精度区分 (要領第40条)")
@@ -709,7 +717,6 @@ active_df = st.session_state["points_df"][st.session_state["points_df"]["使用"
 available_names = active_df["点名"].astype(str).tolist()
 valid_names_set = set(available_names)
 
-# 路線辞書の整合性維持
 if not st.session_state["routes_dict"]:
     st.session_state["routes_dict"] = {"路線1": []}
 for rname in list(st.session_state["routes_dict"].keys()):
@@ -729,7 +736,6 @@ if available_names:
 is_network_mode = "結合多角方式" in survey_method
 pts_lookup_all = {str(row["点名"]): row for _, row in active_df.iterrows()}
 
-# 結合多角方式の場合は事前に網トポロジーを解析し、交点（3路線以上の結節点）を特定
 net_analysis = None
 junction_set = set()
 if is_network_mode:
@@ -806,7 +812,7 @@ for idx, rname in enumerate(current_route_list, start=1):
 selected_candidate_now = st.session_state.get("route_candidate_select", "")
 label_transforms = compute_label_transforms(active_df, threshold_m=65.0)
 
-# 1) 路線ポリライン描画（結合多角方式なら全路線を色分け描画、それ以外は路線1を描画）
+# 1) 路線ポリライン描画
 routes_to_draw = (
     st.session_state["routes_dict"]
     if is_network_mode
@@ -858,7 +864,7 @@ for _, row in active_df.iterrows():
     is_junction = pt_name in junction_set
 
     if is_junction:
-        pin_color = "#e65100"  # 交点はオレンジで強調
+        pin_color = "#e65100"
     elif row["区分"] == "新点":
         pin_color = "#d32f2f"
     elif row["区分"] == "恒久的地物":
@@ -1127,7 +1133,6 @@ if is_network_mode:
         total_net_len_m = net_analysis["total_unique_length_m"]
         total_net_len_km = total_net_len_m / 1000.0
 
-        # 1. 既知点数チェック（要領第4条第7号・マニュアル第4条解説1：3点以上）
         if known_cnt < 3:
             ng_list.append(
                 f"【要領第4条第7号・マニュアル第4条 NG】結合多角方式は「3点以上の既知点」を使用する必要があります（現在：{known_cnt}点）。2点のみの場合は「単路線方式」を選択してください。"
@@ -1137,7 +1142,6 @@ if is_network_mode:
                 f"既知点 {known_cnt}点（{', '.join(net_analysis['known_nodes'])}）を使用した結合多角網です（方向角の取り付け観測は省略可能：マニュアル第4条解説1）。"
             )
 
-        # 2. 網の連結性・開放端（未結合新点）チェック
         if net_analysis["components"] > 1:
             ng_list.append(
                 f"【マニュアル第4条 NG】多角網が {net_analysis['components']} つのグループに分断されています。交点または既知点を共有させて1つの網に結合してください。"
@@ -1149,7 +1153,6 @@ if is_network_mode:
         elif net_analysis["components"] == 1:
             ok_list.append(f"網形判定：**{net_analysis['net_shape']}**（全路線が閉合・結合しています）。")
 
-        # 3. 交点の判定結果（マニュアル第4条解説2）
         if junc_cnt >= 1:
             ok_list.append(
                 f"【マニュアル第4条解説2】3路線以上が交わる交点：**{', '.join(net_analysis['junction_nodes'])}**（計{junc_cnt}点）を自動認識しました。"
@@ -1159,13 +1162,11 @@ if is_network_mode:
                 "【注意】3路線以上が交わる交点が検出されていません。Y字型・H字型にする場合は、同一の新点（交点）を始点または終点として3本以上の路線を接続してください。"
             )
 
-        # 4. 各路線ごとの区間構成・折れ点夾角チェック
         all_legs_rows = []
         all_inner_angles_rows = []
         for rname, rpts in st.session_state["routes_dict"].items():
             if len(rpts) < 2:
                 continue
-            # 端点区分チェック（マニュアル第4条解説2：既知点〜交点、交点〜交点、既知点〜既知点）
             end_types = [
                 "交点" if rpts[0] in junction_set else pts_lookup_all[rpts[0]]["区分"],
                 "交点" if rpts[-1] in junction_set else pts_lookup_all[rpts[-1]]["区分"],
@@ -1215,7 +1216,6 @@ if is_network_mode:
                         f"【マニュアル第4条解説3 NG】{rname} の新点「{p_curr['点名']}」の夾角が {deg_to_dms_str(inc_ang)} です（60°以上必要）。"
                     )
 
-        # 5. 交点での分岐夾角チェック（マニュアル第4条解説3）
         j_ang_df = net_analysis["junction_angles_df"]
         if not j_ang_df.empty:
             for _, jrow in j_ang_df.iterrows():
@@ -1224,7 +1224,6 @@ if is_network_mode:
                         f"【マニュアル第4条解説3 NG】交点「{jrow['交点']}」の分岐夾角（{jrow['分岐方向1']} - {jrow['分岐方向2']}）が {jrow['分岐夾角']} と狭すぎます（40°〜50°以上推奨）。"
                     )
 
-        # 6. 点検路線の網羅性チェック（マニュアル第16条第2項）
         if net_analysis["unconnected_known"]:
             ng_list.append(
                 f"【マニュアル第16条第2項 NG】既知点「{', '.join(net_analysis['unconnected_known'])}」が他の既知点と点検路線で結合されていません。"
@@ -1234,7 +1233,6 @@ if is_network_mode:
                 f"【マニュアル第16条適合】全既知点を結合する点検路線（計{len(net_analysis['check_routes_df'])}路線）を確認しました。"
             )
 
-        # メトリクス表示
         m1, m2, m3, m4 = st.columns(4)
         m1.metric("網形判定", net_analysis["net_shape"].split("（")[0], f"既知点{known_cnt} / 交点{junc_cnt}")
         m2.metric("網総延長（重複除く）", f"{total_net_len_m:.3f} m", f"{total_net_len_km:.3f} km")
@@ -1248,7 +1246,6 @@ if is_network_mode:
         for msg in ok_list:
             st.success(msg)
 
-        # 点検路線表（マニュアル第16条・要領第28条）
         if not net_analysis["check_routes_df"].empty:
             st.markdown("**点検路線ごとの閉合差許容限度表（マニュアル第16条・要領第28条基準）**")
             st.dataframe(net_analysis["check_routes_df"], use_container_width=True, hide_index=True)
